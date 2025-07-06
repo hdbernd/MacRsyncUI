@@ -733,15 +733,11 @@ class JobManager {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
       
-      console.log(`Job ${job.id}: Processing line: "${trimmedLine}"`);
-      
-      // Parse file count from the "to-chk" line (this gives us overall progress info)
-      // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfr#161, to-check=429/724)"
-      // Simpler regex to just capture the file count info
-      const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
-      if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-check')) {
-        console.log(`Job ${job.id}: Trying to match line: "${trimmedLine}"`);
-        console.log(`Job ${job.id}: Match result:`, fileCountMatch);
+      // Parse file count from the rsync progress line
+      // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfer#161, to-check=429/724)"
+      const fileCountMatch = trimmedLine.match(/\(xfer#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
+      if (fileCountMatch) {
+        console.log(`Job ${job.id}: Progress match found: xfer#${fileCountMatch[1]}, ${fileCountMatch[2]}/${fileCountMatch[3]} remaining`);
       }
       if (fileCountMatch) {
         const [, xfrNum, remaining, total] = fileCountMatch;
