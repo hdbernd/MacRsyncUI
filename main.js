@@ -36,6 +36,7 @@ class JobManager {
         averageSpeed: '0B/s',
         transferred: '0B',
         total: '0B',
+        totalBytes: 0,
         eta: null,
         currentFile: '',
         fileCount: { current: 0, total: 0 },
@@ -70,7 +71,7 @@ class JobManager {
   }
 
   executeJob(job) {
-    const args = ['-avz', '--partial', '--progress', '--human-readable'];
+    const args = ['-avz', '--partial', '--progress', '--human-readable', '--stats'];
     
     if (job.isMove) {
       args.push('--remove-source-files');
@@ -191,6 +192,7 @@ class JobManager {
       averageSpeed: '0B/s',
       transferred: '0B',
       total: '0B',
+      totalBytes: 0,
       eta: null,
       currentFile: '',
       fileCount: { current: 0, total: 0 },
@@ -218,24 +220,41 @@ class JobManager {
   }
 
   parseProgressData(job, output) {
+    console.log('Raw rsync output:', JSON.stringify(output));
     const lines = output.split('\n');
     
     for (const line of lines) {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
       
-      // Parse percentage and speed: "  1,234,567  75%   12.34MB/s    0:00:15"
-      const progressMatch = trimmedLine.match(/(\d+,?\d*)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
-      if (progressMatch) {
-        const [, transferred, percentage, speed, timeRemaining] = progressMatch;
+      // Parse file count from the "to-chk" line (this gives us overall progress info)
+      // Format: "  1,234,567  100%   12.34MB/s    0:00:15 (xfr#123, to-chk=45/678)"
+      const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*(?:ir-chk|to-chk)=(\d+)\/(\d+)\)/);
+      if (fileCountMatch) {
+        const [, xfrNum, remaining, total] = fileCountMatch;
+        job.progressData.fileCount.total = parseInt(total);
+        job.progressData.fileCount.current = parseInt(total) - parseInt(remaining);
         
-        job.progressData.percentage = parseInt(percentage);
+        // Calculate overall progress based on files transferred
+        const fileProgress = Math.round((job.progressData.fileCount.current / job.progressData.fileCount.total) * 100);
+        job.progressData.percentage = fileProgress;
+        job.progress = fileProgress;
+        
+        console.log(`Job ${job.id}: ${job.progressData.fileCount.current}/${job.progressData.fileCount.total} files = ${fileProgress}% overall progress`);
+      }
+      
+      // Parse progress line with speed and timing info
+      // Format: "  1,234,567  75%   12.34MB/s    0:00:15"
+      const progressMatch = trimmedLine.match(/^\s*(\d{1,3}(?:,\d{3})*|\d+)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
+      if (progressMatch) {
+        const [, transferred, , speed, timeRemaining] = progressMatch;
+        
         job.progressData.currentSpeed = speed;
         job.progressData.transferred = this.formatBytes(parseInt(transferred.replace(/,/g, '')));
         job.progressData.eta = timeRemaining;
         job.progressData.lastUpdate = Date.now();
         
-        // Add to speed history (keep last 60 entries for 1-minute history)
+        // Add to speed history
         job.progressData.speedHistory.push({
           timestamp: Date.now(),
           speed: this.parseSpeed(speed)
@@ -251,19 +270,31 @@ class JobManager {
           job.progressData.averageSpeed = this.formatSpeed(avgSpeed);
         }
         
-        job.progress = job.progressData.percentage;
         continue;
       }
       
-      // Parse file transfer line: "filename"
-      if (trimmedLine.length > 0 && !trimmedLine.includes('%') && !trimmedLine.includes('receiving file list')) {
+      // Parse current file being transferred
+      if (trimmedLine.length > 0 && 
+          !trimmedLine.includes('%') && 
+          !trimmedLine.includes('receiving file list') &&
+          !trimmedLine.includes('sending incremental') &&
+          !trimmedLine.includes('total size') &&
+          !trimmedLine.includes('speedup') &&
+          !trimmedLine.includes('Number of files') &&
+          !trimmedLine.includes('Total file size') &&
+          !trimmedLine.includes('delta-transmission') &&
+          !trimmedLine.match(/^\s*$/) &&
+          !trimmedLine.match(/^[\d,]+\s+\d+%/) &&
+          !trimmedLine.includes('(') &&
+          trimmedLine.length > 3) {
+        
         job.progressData.currentFile = trimmedLine.substring(0, 50) + (trimmedLine.length > 50 ? '...' : '');
+        console.log(`Job ${job.id}: Current file: ${job.progressData.currentFile}`);
       }
       
-      // Parse total files count: "receiving file list ... done"
-      const fileListMatch = trimmedLine.match(/receiving file list.*(\d+) files/);
-      if (fileListMatch) {
-        job.progressData.fileCount.total = parseInt(fileListMatch[1]);
+      // Parse file list completion
+      if (trimmedLine.includes('receiving file list') && trimmedLine.includes('done')) {
+        job.progressData.currentFile = 'File list received, starting transfer...';
       }
     }
   }

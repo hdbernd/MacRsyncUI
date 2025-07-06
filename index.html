@@ -426,6 +426,16 @@
             color: #6c757d;
         }
         
+        .file-count {
+            color: #17a2b8;
+            font-weight: 600;
+        }
+        
+        .elapsed {
+            color: #fd7e14;
+            font-weight: 600;
+        }
+        
         .eta {
             color: #007AFF;
             font-weight: 600;
@@ -522,7 +532,10 @@
         </div>
         
         <div class="progress-section">
-            <label>Progress Log:</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <label>Progress Log:</label>
+                <button class="btn btn-secondary" onclick="copyLogToClipboard()" title="Copy entire log to clipboard">📋 Copy Log</button>
+            </div>
             <div class="progress-log" id="progress-log"></div>
         </div>
     </div>

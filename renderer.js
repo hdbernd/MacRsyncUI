@@ -421,6 +421,9 @@ function renderJobs() {
     // Draw speed graphs for running jobs
     jobs.filter(job => job.status === 'running' && job.progressData && job.progressData.speedHistory.length > 1)
         .forEach(job => drawSpeedGraph(job));
+    
+    // Update elapsed time for running jobs
+    updateElapsedTimes();
 }
 
 function drawSpeedGraph(job) {
@@ -483,6 +486,32 @@ function drawSpeedGraph(job) {
     ctx.fill();
 }
 
+function updateElapsedTimes() {
+    jobs.filter(job => job.status === 'running' && job.startTime)
+        .forEach(job => {
+            const elapsedElement = document.querySelector(`[data-job-id="${job.id}"] .elapsed`);
+            if (elapsedElement) {
+                const elapsedTime = formatElapsedTime(new Date(job.startTime));
+                elapsedElement.textContent = `⏱️ ${elapsedTime}`;
+            }
+        });
+}
+
+function formatElapsedTime(startTime) {
+    const now = new Date();
+    const elapsed = Math.floor((now - startTime) / 1000); // seconds
+    
+    const hours = Math.floor(elapsed / 3600);
+    const minutes = Math.floor((elapsed % 3600) / 60);
+    const seconds = elapsed % 60;
+    
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    } else {
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+}
+
 function createJobHTML(job) {
     const formatTime = (timestamp) => {
         if (!timestamp) return '';
@@ -526,20 +555,26 @@ function createJobHTML(job) {
         if (!['running', 'paused'].includes(job.status) || !job.progressData) return '';
         
         const progress = job.progressData;
+        const elapsedTime = job.startTime ? formatElapsedTime(new Date(job.startTime)) : '';
+        const fileProgress = progress.fileCount.total > 0 ? 
+            `${progress.fileCount.current}/${progress.fileCount.total} files` : '';
+        
         return `
             <div class="job-progress-container">
                 <div class="progress-bar">
                     <div class="progress-bar-fill" style="width: ${progress.percentage}%"></div>
-                    <div class="progress-bar-text">${progress.percentage}%</div>
+                    <div class="progress-bar-text">${progress.percentage}% (Overall Progress)</div>
                 </div>
                 <div class="job-stats">
                     <div class="job-stats-left">
                         <span class="speed-current">🚀 ${progress.currentSpeed}</span>
                         <span class="speed-average">📊 ${progress.averageSpeed}</span>
-                        <span class="transferred">📦 ${progress.transferred}</span>
+                        <span class="transferred">📦 ${progress.transferred}${progress.total && progress.total !== '0B' ? `/${progress.total}` : ''}</span>
+                        ${fileProgress ? `<span class="file-count">📁 ${fileProgress}</span>` : ''}
                     </div>
                     <div class="job-stats-right">
-                        ${progress.eta ? `<span class="eta">⏱️ ${progress.eta}</span>` : ''}
+                        ${elapsedTime ? `<span class="elapsed">⏱️ ${elapsedTime}</span>` : ''}
+                        ${progress.eta ? `<span class="eta">🎯 ETA: ${progress.eta}</span>` : ''}
                         <canvas class="job-speed-graph" data-job-id="${job.id}"></canvas>
                     </div>
                 </div>
@@ -618,3 +653,21 @@ ipcRenderer.on('job-removed', (event, jobId) => {
     jobs = jobs.filter(j => j.id !== jobId);
     renderJobs();
 });
+
+// Copy log to clipboard function
+async function copyLogToClipboard() {
+    try {
+        const logContent = progressLog.textContent;
+        await navigator.clipboard.writeText(logContent);
+        logMessage('📋 Log copied to clipboard!');
+    } catch (error) {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = progressLog.textContent;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        logMessage('📋 Log copied to clipboard!');
+    }
+}
