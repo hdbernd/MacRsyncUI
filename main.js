@@ -733,15 +733,17 @@ class JobManager {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
       
+      console.log(`Job ${job.id}: Processing line: "${trimmedLine}"`);
+      
       // Parse file count from the "to-chk" line (this gives us overall progress info)
       // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfr#161, to-check=429/724)"
-      const fileCountMatch = trimmedLine.match(/(\d{1,3}(?:,\d{3})*|\d+)\s+(\d+)%\s+[\d.]+[KMGT]?B\/s\s+\d+:\d+:\d+\s+\(xfr#(\d+),\s*(?:ir-chk|to-chk)=(\d+)\/(\d+)\)/);
+      const fileCountMatch = trimmedLine.match(/(\d+)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+\d+:\d+:\d+\s+\(xfr#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
       if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-chk')) {
         console.log(`Job ${job.id}: Trying to match line: "${trimmedLine}"`);
         console.log(`Job ${job.id}: Match result:`, fileCountMatch);
       }
       if (fileCountMatch) {
-        const [, transferred, percent, xfrNum, remaining, total] = fileCountMatch;
+        const [, transferred, speed, xfrNum, remaining, total] = fileCountMatch;
         const totalFiles = parseInt(total);
         const remainingFiles = parseInt(remaining);
         const currentFiles = totalFiles - remainingFiles;
@@ -758,7 +760,7 @@ class JobManager {
         console.log(`Job ${job.id}: Raw match: xfr#${xfrNum}, to-chk=${remainingFiles}/${totalFiles}`);
         
         // Also update speed and transfer data from this combined line
-        job.progressData.currentSpeed = fileCountMatch[0].match(/([\d.]+[KMGT]?B\/s)/)[1];
+        job.progressData.currentSpeed = speed;
         job.progressData.transferred = this.formatBytes(parseInt(transferred.replace(/,/g, '')));
         job.progressData.lastUpdate = Date.now();
         
