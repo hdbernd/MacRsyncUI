@@ -3,22 +3,481 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const crypto = require('crypto');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
 let mainWindow;
 let rsyncProcess = null;
 let jobManager = null;
+
+class SmartJobNaming {
+  static async generateJobName(sourcePath, targetPath, isMove = false) {
+    try {
+      const sourceInfo = await this.analyzeFolder(sourcePath);
+      const targetInfo = await this.analyzeFolder(targetPath);
+      
+      const operation = isMove ? 'Move' : 'Copy';
+      const timestamp = new Date().toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      
+      // Generate smart name based on analysis
+      let smartName = this.generateNameFromAnalysis(sourceInfo, targetInfo, operation);
+      
+      return `${smartName} - ${timestamp}`;
+    } catch (error) {
+      console.error('Error generating smart name:', error);
+      return this.generateFallbackName(sourcePath, isMove);
+    }
+  }
+  
+  static async analyzeFolder(folderPath) {
+    try {
+      const baseName = path.basename(folderPath);
+      const stats = { name: baseName, type: 'unknown', fileCount: 0, totalSize: 0, fileTypes: {} };
+      
+      // Get basic folder info
+      try {
+        const { stdout } = await execAsync(`find "${folderPath}" -type f | head -100`);
+        const files = stdout.trim().split('\n').filter(f => f);
+        stats.fileCount = files.length;
+        
+        // Analyze file types
+        for (const file of files.slice(0, 20)) { // Sample first 20 files
+          const ext = path.extname(file).toLowerCase();
+          if (ext) {
+            stats.fileTypes[ext] = (stats.fileTypes[ext] || 0) + 1;
+          }
+        }
+        
+        // Get folder size (limited for performance)
+        try {
+          const { stdout: sizeOutput } = await execAsync(`du -sh "${folderPath}" 2>/dev/null || echo "0K"`);
+          stats.totalSize = sizeOutput.split('\t')[0];
+        } catch (e) {
+          stats.totalSize = 'Unknown';
+        }
+        
+      } catch (e) {
+        console.log('Could not analyze folder contents:', e.message);
+      }
+      
+      // Determine folder type
+      stats.type = this.categorizeFolder(baseName, stats.fileTypes);
+      
+      return stats;
+    } catch (error) {
+      return { name: path.basename(folderPath), type: 'unknown', fileCount: 0, fileTypes: {} };
+    }
+  }
+  
+  static categorizeFolder(folderName, fileTypes) {
+    const name = folderName.toLowerCase();
+    const extensions = Object.keys(fileTypes);
+    
+    // Camera/Photo folders
+    if (name.includes('dcim') || name.includes('camera') || name.includes('photos')) {
+      return 'photos';
+    }
+    
+    // Video folders
+    if (name.includes('video') || name.includes('movies')) {
+      return 'videos';
+    }
+    
+    // Document folders
+    if (name.includes('documents') || name.includes('papers') || name.includes('files')) {
+      return 'documents';
+    }
+    
+    // Music folders
+    if (name.includes('music') || name.includes('audio') || name.includes('songs')) {
+      return 'music';
+    }
+    
+    // Backup folders
+    if (name.includes('backup') || name.includes('archive')) {
+      return 'backup';
+    }
+    
+    // Analyze by file extensions
+    const photoExts = ['.jpg', '.jpeg', '.png', '.raw', '.dng', '.tiff', '.heic'];
+    const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.m4v', '.3gp'];
+    const docExts = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.pages'];
+    const musicExts = ['.mp3', '.m4a', '.wav', '.flac', '.aac'];
+    
+    const photoCount = extensions.filter(ext => photoExts.includes(ext)).length;
+    const videoCount = extensions.filter(ext => videoExts.includes(ext)).length;
+    const docCount = extensions.filter(ext => docExts.includes(ext)).length;
+    const musicCount = extensions.filter(ext => musicExts.includes(ext)).length;
+    
+    if (photoCount > 0 && photoCount >= videoCount) return 'photos';
+    if (videoCount > 0) return 'videos';
+    if (docCount > 0) return 'documents';
+    if (musicCount > 0) return 'music';
+    
+    return 'files';
+  }
+  
+  static generateNameFromAnalysis(sourceInfo, targetInfo, operation) {
+    const typeMap = {
+      'photos': 'Photo Import',
+      'videos': 'Video Transfer',
+      'documents': 'Document Backup',
+      'music': 'Music Sync',
+      'backup': 'Backup Job',
+      'files': 'File Transfer'
+    };
+    
+    const sourceType = typeMap[sourceInfo.type] || 'Transfer';
+    const sourceName = sourceInfo.name;
+    
+    // Check if it's a camera/device import
+    if (sourceInfo.type === 'photos' && sourceName.toUpperCase().includes('DCIM')) {
+      return `Camera Import (${sourceInfo.fileCount} items)`;
+    }
+    
+    // Check if it's going to a backup location
+    if (targetInfo.name.toLowerCase().includes('backup') || 
+        targetInfo.name.toLowerCase().includes('archive')) {
+      return `${sourceType} to ${targetInfo.name}`;
+    }
+    
+    // Default naming with file count
+    const fileCountStr = sourceInfo.fileCount > 0 ? ` (${sourceInfo.fileCount} files)` : '';
+    return `${sourceType}: ${sourceName}${fileCountStr}`;
+  }
+  
+  static generateFallbackName(sourcePath, isMove) {
+    const operation = isMove ? 'Move' : 'Copy';
+    const folderName = path.basename(sourcePath);
+    const timestamp = new Date().toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    
+    return `${operation} ${folderName} - ${timestamp}`;
+  }
+}
+
+class ErrorAnalyzer {
+  static analyzeError(errorMessage) {
+    const error = errorMessage.toLowerCase();
+    
+    // Common rsync error patterns and solutions
+    const errorPatterns = [
+      {
+        pattern: /permission denied|operation not permitted/,
+        title: '🔒 Permission Error',
+        explanation: 'The transfer failed due to insufficient permissions.',
+        solutions: [
+          'Check that you have write permissions to the target folder',
+          'Try running with administrator privileges if copying system files',
+          'Ensure the source files are not locked or in use by another application'
+        ]
+      },
+      {
+        pattern: /no space left on device/,
+        title: '💾 Storage Full',
+        explanation: 'The destination drive does not have enough free space.',
+        solutions: [
+          'Free up space on the target drive',
+          'Choose a different destination with more available space',
+          'Consider compressing files before transfer'
+        ]
+      },
+      {
+        pattern: /connection refused|host unreachable|network/,
+        title: '🌐 Network Error',
+        explanation: 'Cannot connect to the remote destination.',
+        solutions: [
+          'Check your network connection',
+          'Verify the target path is accessible and mounted',
+          'Try reconnecting to the network drive or NAS'
+        ]
+      },
+      {
+        pattern: /file exists|already exists/,
+        title: '📁 File Conflict',
+        explanation: 'Files with the same name already exist at the destination.',
+        solutions: [
+          'Use different rsync options to handle duplicates',
+          'Rename conflicting files manually',
+          'Choose to skip existing files or overwrite them'
+        ]
+      },
+      {
+        pattern: /invalid argument|illegal option/,
+        title: '⚙️ Invalid Parameters',
+        explanation: 'The rsync command contains invalid options or arguments.',
+        solutions: [
+          'Check that file paths contain valid characters',
+          'Verify source and target paths exist',
+          'Try using different rsync options'
+        ]
+      },
+      {
+        pattern: /timeout|timed out/,
+        title: '⏱️ Connection Timeout',
+        explanation: 'The transfer took too long and timed out.',
+        solutions: [
+          'Check network stability and speed',
+          'Try transferring smaller batches of files',
+          'Increase timeout settings if available'
+        ]
+      },
+      {
+        pattern: /rsync: unrecognized option/,
+        title: '🔧 Unsupported Option',
+        explanation: 'Your version of rsync does not support this option.',
+        solutions: [
+          'Update rsync to the latest version',
+          'Use alternative transfer method for this feature',
+          'Check rsync documentation for supported options'
+        ]
+      }
+    ];
+    
+    // Find matching error pattern
+    for (const errorInfo of errorPatterns) {
+      if (errorInfo.pattern.test(error)) {
+        return {
+          type: 'analyzed',
+          title: errorInfo.title,
+          explanation: errorInfo.explanation,
+          solutions: errorInfo.solutions,
+          originalError: errorMessage
+        };
+      }
+    }
+    
+    // Generic error if no specific pattern matches
+    return {
+      type: 'generic',
+      title: '❌ Transfer Error',
+      explanation: 'An error occurred during the file transfer.',
+      solutions: [
+        'Check the error message below for specific details',
+        'Verify source and target paths are correct and accessible',
+        'Try restarting the transfer',
+        'Check available disk space and permissions'
+      ],
+      originalError: errorMessage
+    };
+  }
+  
+  static formatErrorSuggestion(analysis) {
+    let message = `${analysis.title}\n${analysis.explanation}\n\nSuggested solutions:`;
+    analysis.solutions.forEach((solution, index) => {
+      message += `\n${index + 1}. ${solution}`;
+    });
+    message += `\n\nOriginal error: ${analysis.originalError}`;
+    return message;
+  }
+}
+
+class TransferOptimizer {
+  static getOptimizationRecommendations(sourceInfo, targetInfo, transferHistory) {
+    const recommendations = [];
+    
+    // File type specific optimizations
+    if (sourceInfo.type === 'photos') {
+      recommendations.push({
+        type: 'optimization',
+        title: '📸 Photo Transfer Optimization',
+        suggestion: 'Consider using --compress for RAW files to save bandwidth',
+        details: 'Large photo files benefit from compression during transfer'
+      });
+    }
+    
+    if (sourceInfo.type === 'videos') {
+      recommendations.push({
+        type: 'optimization',
+        title: '🎬 Video Transfer Optimization',
+        suggestion: 'Use --partial for large video files to enable resume capability',
+        details: 'Video files are large and transfers may be interrupted'
+      });
+    }
+    
+    // Size-based recommendations
+    if (sourceInfo.fileCount > 1000) {
+      recommendations.push({
+        type: 'performance',
+        title: '🚀 Large Transfer Optimization',
+        suggestion: 'Consider using --delete-during for efficiency with many files',
+        details: 'Reduces memory usage when synchronizing large directories'
+      });
+    }
+    
+    // Historical performance recommendations
+    if (transferHistory && transferHistory.length > 0) {
+      const avgSpeed = transferHistory.reduce((sum, t) => {
+        const speed = this.parseSpeedToBytes(t.averageSpeed);
+        return sum + speed;
+      }, 0) / transferHistory.length;
+      
+      if (avgSpeed < 10 * 1024 * 1024) { // Less than 10MB/s
+        recommendations.push({
+          type: 'network',
+          title: '🌐 Network Performance',
+          suggestion: 'Consider running transfers during off-peak hours',
+          details: 'Historical transfers show slower speeds, network may be congested'
+        });
+      }
+    }
+    
+    // Backup-specific recommendations
+    if (targetInfo.name.toLowerCase().includes('backup')) {
+      recommendations.push({
+        type: 'backup',
+        title: '💾 Backup Best Practice',
+        suggestion: 'Use --checksum for critical backup operations',
+        details: 'Ensures data integrity by verifying file checksums'
+      });
+    }
+    
+    return recommendations;
+  }
+  
+  static parseSpeedToBytes(speedStr) {
+    const match = speedStr.match(/([\d.]+)([KMGT]?)B\/s/);
+    if (!match) return 0;
+    
+    const [, value, unit] = match;
+    const multipliers = { '': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4 };
+    return parseFloat(value) * (multipliers[unit] || 1);
+  }
+  
+  static getTimeBasedRecommendations() {
+    const hour = new Date().getHours();
+    const recommendations = [];
+    
+    // Time-based suggestions
+    if (hour >= 9 && hour <= 17) {
+      recommendations.push({
+        type: 'timing',
+        title: '⏰ Peak Hours Notice',
+        suggestion: 'Consider scheduling large transfers for evening hours',
+        details: 'Network performance is typically better during off-peak times'
+      });
+    }
+    
+    return recommendations;
+  }
+}
+
+class TransferHistory {
+  constructor() {
+    this.historyFile = path.join(app.getPath('userData'), 'transfer_history.json');
+    this.history = this.loadHistory();
+  }
+  
+  loadHistory() {
+    try {
+      if (fs.existsSync(this.historyFile)) {
+        const data = fs.readFileSync(this.historyFile, 'utf8');
+        return JSON.parse(data);
+      }
+    } catch (error) {
+      console.error('Error loading transfer history:', error);
+    }
+    return [];
+  }
+  
+  saveHistory() {
+    try {
+      fs.writeFileSync(this.historyFile, JSON.stringify(this.history, null, 2));
+    } catch (error) {
+      console.error('Error saving transfer history:', error);
+    }
+  }
+  
+  recordTransfer(job) {
+    const record = {
+      id: job.id,
+      name: job.name,
+      source: job.source,
+      target: job.target,
+      isMove: job.isMove,
+      status: job.status,
+      startTime: job.startTime,
+      endTime: job.endTime,
+      duration: job.endTime && job.startTime ? 
+        new Date(job.endTime) - new Date(job.startTime) : null,
+      fileCount: job.progressData?.fileCount?.total || 0,
+      transferred: job.progressData?.transferred || '0B',
+      averageSpeed: job.progressData?.averageSpeed || '0B/s',
+      recordedAt: new Date().toISOString()
+    };
+    
+    this.history.unshift(record); // Add to beginning
+    
+    // Keep only last 100 transfers
+    if (this.history.length > 100) {
+      this.history = this.history.slice(0, 100);
+    }
+    
+    this.saveHistory();
+  }
+  
+  getRecentTransfers(limit = 10) {
+    return this.history.slice(0, limit);
+  }
+  
+  getSimilarTransfers(sourcePath, targetPath) {
+    return this.history.filter(record => 
+      record.source === sourcePath || 
+      record.target === targetPath ||
+      path.basename(record.source) === path.basename(sourcePath)
+    );
+  }
+  
+  predictTransferTime(fileCount, totalSize) {
+    const similar = this.history.filter(record => 
+      record.fileCount > 0 && record.duration > 0
+    );
+    
+    if (similar.length === 0) return null;
+    
+    // Simple prediction based on file count
+    const avgTimePerFile = similar.reduce((sum, record) => 
+      sum + (record.duration / record.fileCount), 0) / similar.length;
+    
+    return Math.round(avgTimePerFile * fileCount / 1000); // Convert to seconds
+  }
+}
 
 class JobManager {
   constructor() {
     this.jobs = new Map();
     this.activeJobs = new Set();
     this.maxConcurrentJobs = 3;
+    this.transferHistory = new TransferHistory();
   }
 
-  createJob(config) {
+  async createJob(config) {
+    // Generate smart name if not provided
+    let jobName = config.name;
+    if (!jobName || jobName.trim() === '') {
+      try {
+        jobName = await SmartJobNaming.generateJobName(config.source, config.target, config.isMove);
+      } catch (error) {
+        console.error('Error generating smart name:', error);
+        jobName = SmartJobNaming.generateFallbackName(config.source, config.isMove);
+      }
+    }
+
     const job = {
       id: crypto.randomUUID(),
-      name: config.name || `${config.isMove ? 'Move' : 'Copy'} Job`,
+      name: jobName,
       source: config.source,
       target: config.target,
       isMove: config.isMove,
@@ -91,13 +550,19 @@ class JobManager {
     job.process.stderr.on('data', (data) => {
       const error = data.toString();
       job.error = error;
-      this.notifyJobError(job.id, error);
+      
+      // Analyze error and provide suggestions
+      const analysis = ErrorAnalyzer.analyzeError(error);
+      this.notifyJobError(job.id, error, analysis);
     });
 
     job.process.on('close', (code) => {
       job.endTime = new Date().toISOString();
       job.status = code === 0 ? 'completed' : 'failed';
       job.process = null;
+      
+      // Record in transfer history
+      this.transferHistory.recordTransfer(job);
       
       this.activeJobs.delete(job.id);
       this.notifyJobUpdate(job);
@@ -109,6 +574,9 @@ class JobManager {
       job.status = 'failed';
       job.endTime = new Date().toISOString();
       job.process = null;
+      
+      // Record failed transfer in history
+      this.transferHistory.recordTransfer(job);
       
       this.activeJobs.delete(job.id);
       this.notifyJobUpdate(job);
@@ -376,9 +844,9 @@ class JobManager {
     }
   }
 
-  notifyJobError(jobId, error) {
+  notifyJobError(jobId, error, analysis = null) {
     if (mainWindow) {
-      mainWindow.webContents.send('job-error', { jobId, error });
+      mainWindow.webContents.send('job-error', { jobId, error, analysis });
     }
   }
 
@@ -586,4 +1054,48 @@ ipcMain.handle('get-all-jobs', async () => {
 ipcMain.handle('get-job', async (event, jobId) => {
   if (!jobManager) return null;
   return jobManager.getJob(jobId);
+});
+
+// Smart naming and history IPC handlers
+ipcMain.handle('generate-smart-name', async (event, sourcePath, targetPath, isMove) => {
+  try {
+    return await SmartJobNaming.generateJobName(sourcePath, targetPath, isMove);
+  } catch (error) {
+    return SmartJobNaming.generateFallbackName(sourcePath, isMove);
+  }
+});
+
+ipcMain.handle('get-transfer-history', async (event, limit = 10) => {
+  if (!jobManager) return [];
+  return jobManager.transferHistory.getRecentTransfers(limit);
+});
+
+ipcMain.handle('get-similar-transfers', async (event, sourcePath, targetPath) => {
+  if (!jobManager) return [];
+  return jobManager.transferHistory.getSimilarTransfers(sourcePath, targetPath);
+});
+
+ipcMain.handle('predict-transfer-time', async (event, fileCount, totalSize) => {
+  if (!jobManager) return null;
+  return jobManager.transferHistory.predictTransferTime(fileCount, totalSize);
+});
+
+ipcMain.handle('analyze-error', async (event, errorMessage) => {
+  return ErrorAnalyzer.analyzeError(errorMessage);
+});
+
+ipcMain.handle('get-optimization-recommendations', async (event, sourcePath, targetPath) => {
+  try {
+    const sourceInfo = await SmartJobNaming.analyzeFolder(sourcePath);
+    const targetInfo = await SmartJobNaming.analyzeFolder(targetPath);
+    const history = jobManager ? jobManager.transferHistory.getSimilarTransfers(sourcePath, targetPath) : [];
+    
+    const recommendations = TransferOptimizer.getOptimizationRecommendations(sourceInfo, targetInfo, history);
+    const timeRecommendations = TransferOptimizer.getTimeBasedRecommendations();
+    
+    return [...recommendations, ...timeRecommendations];
+  } catch (error) {
+    console.error('Error getting optimization recommendations:', error);
+    return [];
+  }
 });
