@@ -28,7 +28,20 @@ class JobManager {
       endTime: null,
       process: null,
       error: null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      // Progress tracking
+      progressData: {
+        percentage: 0,
+        currentSpeed: '0B/s',
+        averageSpeed: '0B/s',
+        transferred: '0B',
+        total: '0B',
+        eta: null,
+        currentFile: '',
+        fileCount: { current: 0, total: 0 },
+        speedHistory: [],
+        lastUpdate: null
+      }
     };
     
     this.jobs.set(job.id, job);
@@ -70,6 +83,7 @@ class JobManager {
 
     job.process.stdout.on('data', (data) => {
       const output = data.toString();
+      this.parseProgressData(job, output);
       this.notifyJobProgress(job.id, output);
     });
 
@@ -170,6 +184,20 @@ class JobManager {
     job.endTime = null;
     job.error = null;
     
+    // Reset progress data
+    job.progressData = {
+      percentage: 0,
+      currentSpeed: '0B/s',
+      averageSpeed: '0B/s',
+      transferred: '0B',
+      total: '0B',
+      eta: null,
+      currentFile: '',
+      fileCount: { current: 0, total: 0 },
+      speedHistory: [],
+      lastUpdate: null
+    };
+    
     this.notifyJobUpdate(job);
     return this.startJob(jobId);
   }
@@ -187,6 +215,92 @@ class JobManager {
     this.notifyJobRemoved(jobId);
     this.startNextQueuedJob();
     return true;
+  }
+
+  parseProgressData(job, output) {
+    const lines = output.split('\n');
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) continue;
+      
+      // Parse percentage and speed: "  1,234,567  75%   12.34MB/s    0:00:15"
+      const progressMatch = trimmedLine.match(/(\d+,?\d*)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)/);
+      if (progressMatch) {
+        const [, transferred, percentage, speed, timeRemaining] = progressMatch;
+        
+        job.progressData.percentage = parseInt(percentage);
+        job.progressData.currentSpeed = speed;
+        job.progressData.transferred = this.formatBytes(parseInt(transferred.replace(/,/g, '')));
+        job.progressData.eta = timeRemaining;
+        job.progressData.lastUpdate = Date.now();
+        
+        // Add to speed history (keep last 60 entries for 1-minute history)
+        job.progressData.speedHistory.push({
+          timestamp: Date.now(),
+          speed: this.parseSpeed(speed)
+        });
+        
+        if (job.progressData.speedHistory.length > 60) {
+          job.progressData.speedHistory.shift();
+        }
+        
+        // Calculate average speed
+        if (job.progressData.speedHistory.length > 1) {
+          const avgSpeed = job.progressData.speedHistory.reduce((sum, entry) => sum + entry.speed, 0) / job.progressData.speedHistory.length;
+          job.progressData.averageSpeed = this.formatSpeed(avgSpeed);
+        }
+        
+        job.progress = job.progressData.percentage;
+        continue;
+      }
+      
+      // Parse file transfer line: "filename"
+      if (trimmedLine.length > 0 && !trimmedLine.includes('%') && !trimmedLine.includes('receiving file list')) {
+        job.progressData.currentFile = trimmedLine.substring(0, 50) + (trimmedLine.length > 50 ? '...' : '');
+      }
+      
+      // Parse total files count: "receiving file list ... done"
+      const fileListMatch = trimmedLine.match(/receiving file list.*(\d+) files/);
+      if (fileListMatch) {
+        job.progressData.fileCount.total = parseInt(fileListMatch[1]);
+      }
+    }
+  }
+
+  parseSpeed(speedStr) {
+    const match = speedStr.match(/([\d.]+)([KMGT]?)B\/s/);
+    if (!match) return 0;
+    
+    const [, value, unit] = match;
+    const multipliers = { '': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4 };
+    return parseFloat(value) * (multipliers[unit] || 1);
+  }
+
+  formatSpeed(bytesPerSecond) {
+    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+    let unitIndex = 0;
+    let speed = bytesPerSecond;
+    
+    while (speed >= 1024 && unitIndex < units.length - 1) {
+      speed /= 1024;
+      unitIndex++;
+    }
+    
+    return `${speed.toFixed(2)}${units[unitIndex]}`;
+  }
+
+  formatBytes(bytes) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let unitIndex = 0;
+    let size = bytes;
+    
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+    
+    return `${size.toFixed(2)}${units[unitIndex]}`;
   }
 
   startNextQueuedJob() {

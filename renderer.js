@@ -417,6 +417,70 @@ function renderJobs() {
             }
         }
     });
+    
+    // Draw speed graphs for running jobs
+    jobs.filter(job => job.status === 'running' && job.progressData && job.progressData.speedHistory.length > 1)
+        .forEach(job => drawSpeedGraph(job));
+}
+
+function drawSpeedGraph(job) {
+    const canvas = document.querySelector(`canvas[data-job-id="${job.id}"]`);
+    if (!canvas || !job.progressData.speedHistory.length) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width = 100;
+    const height = canvas.height = 30;
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, width, height);
+    
+    const speedHistory = job.progressData.speedHistory;
+    if (speedHistory.length < 2) return;
+    
+    // Find min/max speeds for scaling
+    const speeds = speedHistory.map(entry => entry.speed);
+    const minSpeed = Math.min(...speeds);
+    const maxSpeed = Math.max(...speeds);
+    const speedRange = maxSpeed - minSpeed || 1;
+    
+    // Draw grid
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+        const y = (height / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+    }
+    
+    // Draw speed line
+    ctx.strokeStyle = '#28a745';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    
+    speedHistory.forEach((entry, index) => {
+        const x = (width / (speedHistory.length - 1)) * index;
+        const y = height - ((entry.speed - minSpeed) / speedRange) * height;
+        
+        if (index === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    
+    ctx.stroke();
+    
+    // Draw current speed point
+    const lastEntry = speedHistory[speedHistory.length - 1];
+    const lastX = width - 2;
+    const lastY = height - ((lastEntry.speed - minSpeed) / speedRange) * height;
+    
+    ctx.fillStyle = '#dc3545';
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 3, 0, 2 * Math.PI);
+    ctx.fill();
 }
 
 function createJobHTML(job) {
@@ -458,6 +522,32 @@ function createJobHTML(job) {
     const sourceName = job.source.split('/').pop() || job.source;
     const targetName = job.target.split('/').pop() || job.target;
     
+    const createProgressSection = (job) => {
+        if (!['running', 'paused'].includes(job.status) || !job.progressData) return '';
+        
+        const progress = job.progressData;
+        return `
+            <div class="job-progress-container">
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" style="width: ${progress.percentage}%"></div>
+                    <div class="progress-bar-text">${progress.percentage}%</div>
+                </div>
+                <div class="job-stats">
+                    <div class="job-stats-left">
+                        <span class="speed-current">🚀 ${progress.currentSpeed}</span>
+                        <span class="speed-average">📊 ${progress.averageSpeed}</span>
+                        <span class="transferred">📦 ${progress.transferred}</span>
+                    </div>
+                    <div class="job-stats-right">
+                        ${progress.eta ? `<span class="eta">⏱️ ${progress.eta}</span>` : ''}
+                        <canvas class="job-speed-graph" data-job-id="${job.id}"></canvas>
+                    </div>
+                </div>
+                ${progress.currentFile ? `<div class="current-file">📄 ${progress.currentFile}</div>` : ''}
+            </div>
+        `;
+    };
+
     return `
         <div class="job-item" data-job-id="${job.id}">
             <div class="job-info">
@@ -467,7 +557,7 @@ function createJobHTML(job) {
                     ${job.startTime ? `Started: ${formatTime(job.startTime)}` : ''}
                     ${job.endTime ? ` | Ended: ${formatTime(job.endTime)}` : ''}
                 </div>
-                ${job.status === 'running' ? '<div class="job-progress">Preparing...</div>' : ''}
+                ${createProgressSection(job)}
             </div>
             <div class="job-status">
                 <span class="job-status-badge ${job.status}">${job.status}</span>
@@ -489,6 +579,11 @@ ipcRenderer.on('job-update', (event, job) => {
         jobs.push(job);
     }
     renderJobs();
+    
+    // Update speed graph if job is running
+    if (job.status === 'running' && job.progressData && job.progressData.speedHistory.length > 1) {
+        setTimeout(() => drawSpeedGraph(job), 100);
+    }
 });
 
 ipcRenderer.on('job-progress', (event, { jobId, output }) => {
