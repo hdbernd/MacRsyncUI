@@ -739,7 +739,7 @@ class JobManager {
       // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfr#161, to-check=429/724)"
       // Simpler regex to just capture the file count info
       const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
-      if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-chk')) {
+      if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-check')) {
         console.log(`Job ${job.id}: Trying to match line: "${trimmedLine}"`);
         console.log(`Job ${job.id}: Match result:`, fileCountMatch);
       }
