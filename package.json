@@ -1,0 +1,31 @@
+{
+  "name": "mac-rsync-ui",
+  "version": "1.0.0",
+  "description": "Mac app for syncing files to Synology NAS with resume capability",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder"
+  },
+  "keywords": ["electron", "rsync", "synology", "mac"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "build": {
+    "appId": "com.macrsyncui.app",
+    "productName": "Mac Rsync UI",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.utilities"
+    }
+  }
+}
