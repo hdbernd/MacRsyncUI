@@ -1,3 +1,4 @@
+![Project Logo](./logo.png)
 # Mac Rsync UI
 
 A Mac application for syncing files from local folders (like SD cards) to Synology NAS with resume capability.
