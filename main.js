@@ -736,6 +736,10 @@ class JobManager {
       // Parse file count from the "to-chk" line (this gives us overall progress info)
       // Format: "  1,234,567  100%   12.34MB/s    0:00:15 (xfr#123, to-chk=45/678)"
       const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*(?:ir-chk|to-chk)=(\d+)\/(\d+)\)/);
+      if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-chk')) {
+        console.log(`Job ${job.id}: Trying to match line: "${trimmedLine}"`);
+        console.log(`Job ${job.id}: Match result:`, fileCountMatch);
+      }
       if (fileCountMatch) {
         const [, xfrNum, remaining, total] = fileCountMatch;
         const totalFiles = parseInt(total);
