@@ -210,6 +210,159 @@
         .drop-zone.has-file .drop-text {
             color: #28a745;
         }
+        
+        .job-name-input {
+            padding: 8px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            flex: 1;
+            max-width: 200px;
+        }
+        
+        .jobs-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .jobs-section h2 {
+            margin: 0 0 15px 0;
+            color: #333;
+            font-size: 18px;
+        }
+        
+        .jobs-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .jobs-list {
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .no-jobs {
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+        
+        .job-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            transition: background-color 0.2s;
+        }
+        
+        .job-item:last-child {
+            border-bottom: none;
+        }
+        
+        .job-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .job-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .job-name {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .job-paths {
+            font-size: 12px;
+            color: #666;
+            font-family: monospace;
+        }
+        
+        .job-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 100px;
+        }
+        
+        .job-status-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .job-status-badge.pending {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+        
+        .job-status-badge.running {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .job-status-badge.paused {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .job-status-badge.completed {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .job-status-badge.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .job-status-badge.stopped {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+        
+        .job-status-badge.queued {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .job-controls {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .job-controls .btn {
+            padding: 4px 8px;
+            font-size: 12px;
+            min-width: auto;
+        }
+        
+        .job-time {
+            font-size: 11px;
+            color: #999;
+        }
+        
+        .job-progress {
+            font-size: 11px;
+            color: #007AFF;
+            font-family: monospace;
+            background: #f0f8ff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-top: 2px;
+        }
     </style>
 </head>
 <body>
@@ -257,6 +410,8 @@
                     </label>
                 </div>
                 
+                <input type="text" id="job-name" placeholder="Job name (optional)" class="job-name-input">
+                <button class="btn btn-primary" onclick="createJob()" id="create-job-btn">Add to Queue</button>
                 <button class="btn btn-primary" onclick="startSync()" id="start-btn">Start Sync</button>
                 <button class="btn btn-danger hidden" onclick="stopSync()" id="stop-btn">Stop Sync</button>
             </div>
@@ -267,6 +422,17 @@
                     <span id="status-text">Ready</span>
                 </div>
                 <button class="btn btn-secondary" onclick="saveConfig()">Save Config</button>
+            </div>
+        </div>
+        
+        <div class="jobs-section">
+            <h2>Job Queue</h2>
+            <div class="jobs-controls">
+                <button class="btn btn-secondary" onclick="refreshJobs()">Refresh</button>
+                <button class="btn btn-secondary" onclick="clearCompletedJobs()">Clear Completed</button>
+            </div>
+            <div class="jobs-list" id="jobs-list">
+                <div class="no-jobs">No jobs in queue</div>
             </div>
         </div>
         
