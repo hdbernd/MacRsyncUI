@@ -630,6 +630,7 @@ class JobManager {
       try {
         job.process.kill('SIGSTOP');
         job.status = 'paused';
+        // Preserve progress data when pausing
         this.notifyJobUpdate(job);
         return true;
       } catch (error) {
@@ -669,6 +670,7 @@ class JobManager {
     
     job.status = 'stopped';
     job.endTime = new Date().toISOString();
+    // Preserve progress data when stopping
     this.activeJobs.delete(jobId);
     this.notifyJobUpdate(job);
     this.startNextQueuedJob();
@@ -737,24 +739,20 @@ class JobManager {
       // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfer#161, to-check=429/724)"
       const fileCountMatch = trimmedLine.match(/\(xfer#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
       if (fileCountMatch) {
-        console.log(`Job ${job.id}: Progress match found: xfer#${fileCountMatch[1]}, ${fileCountMatch[2]}/${fileCountMatch[3]} remaining`);
-      }
-      if (fileCountMatch) {
         const [, xfrNum, remaining, total] = fileCountMatch;
         const totalFiles = parseInt(total);
         const remainingFiles = parseInt(remaining);
-        const currentFiles = totalFiles - remainingFiles;
+        const transferredFiles = parseInt(xfrNum); // Use xfr# as files transferred
         
         job.progressData.fileCount.total = totalFiles;
-        job.progressData.fileCount.current = currentFiles;
+        job.progressData.fileCount.current = transferredFiles;
         
-        // Calculate overall progress based on files transferred
-        const fileProgress = totalFiles > 0 ? Math.round((currentFiles / totalFiles) * 100) : 0;
+        // Calculate overall progress based on files transferred (xfr#)
+        const fileProgress = totalFiles > 0 ? Math.round((transferredFiles / totalFiles) * 100) : 0;
         job.progressData.percentage = Math.max(0, Math.min(100, fileProgress)); // Clamp between 0-100
         job.progress = job.progressData.percentage;
         
-        console.log(`Job ${job.id}: Progress calculation: ${currentFiles}/${totalFiles} files (${remainingFiles} remaining) = ${fileProgress}% overall progress`);
-        console.log(`Job ${job.id}: Raw match: xfr#${xfrNum}, to-chk=${remainingFiles}/${totalFiles}`);
+        // Debug: console.log(`Job ${job.id}: Progress: ${transferredFiles}/${totalFiles} files = ${fileProgress}%`);
         
         // Update last update time
         job.progressData.lastUpdate = Date.now();
