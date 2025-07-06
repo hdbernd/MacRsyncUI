@@ -738,15 +738,23 @@ class JobManager {
       const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*(?:ir-chk|to-chk)=(\d+)\/(\d+)\)/);
       if (fileCountMatch) {
         const [, xfrNum, remaining, total] = fileCountMatch;
-        job.progressData.fileCount.total = parseInt(total);
-        job.progressData.fileCount.current = parseInt(total) - parseInt(remaining);
+        const totalFiles = parseInt(total);
+        const remainingFiles = parseInt(remaining);
+        const currentFiles = totalFiles - remainingFiles;
+        
+        job.progressData.fileCount.total = totalFiles;
+        job.progressData.fileCount.current = currentFiles;
         
         // Calculate overall progress based on files transferred
-        const fileProgress = Math.round((job.progressData.fileCount.current / job.progressData.fileCount.total) * 100);
-        job.progressData.percentage = fileProgress;
-        job.progress = fileProgress;
+        const fileProgress = totalFiles > 0 ? Math.round((currentFiles / totalFiles) * 100) : 0;
+        job.progressData.percentage = Math.max(0, Math.min(100, fileProgress)); // Clamp between 0-100
+        job.progress = job.progressData.percentage;
         
-        console.log(`Job ${job.id}: ${job.progressData.fileCount.current}/${job.progressData.fileCount.total} files = ${fileProgress}% overall progress`);
+        console.log(`Job ${job.id}: Progress calculation: ${currentFiles}/${totalFiles} files (${remainingFiles} remaining) = ${fileProgress}% overall progress`);
+        console.log(`Job ${job.id}: Raw match: xfr#${xfrNum}, to-chk=${remainingFiles}/${totalFiles}`);
+        
+        // Notify UI of progress update
+        this.notifyJobUpdate(job);
       }
       
       // Parse progress line with speed and timing info
