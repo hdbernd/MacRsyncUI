@@ -43,9 +43,13 @@ class SmartJobNaming {
       
       // Get basic folder info
       try {
-        const { stdout } = await execAsync(`find "${folderPath}" -type f | head -100`);
+        // Get actual file count (not limited)
+        const { stdout: countOutput } = await execAsync(`find "${folderPath}" -type f | wc -l`);
+        stats.fileCount = parseInt(countOutput.trim()) || 0;
+        
+        // Get file list sample for type analysis (limited for performance)
+        const { stdout } = await execAsync(`find "${folderPath}" -type f | head -50`);
         const files = stdout.trim().split('\n').filter(f => f);
-        stats.fileCount = files.length;
         
         // Analyze file types
         for (const file of files.slice(0, 20)) { // Sample first 20 files
@@ -292,28 +296,28 @@ class TransferOptimizer {
     if (sourceInfo.type === 'photos') {
       recommendations.push({
         type: 'optimization',
-        title: '📸 Photo Transfer Optimization',
-        suggestion: 'Consider using --compress for RAW files to save bandwidth',
-        details: 'Large photo files benefit from compression during transfer'
+        title: '📸 Photo Transfer Detected',
+        suggestion: `Transferring ${sourceInfo.fileCount} photo files - compression is already enabled`,
+        details: 'Your photos will be transferred efficiently with built-in compression (-z option)'
       });
     }
     
     if (sourceInfo.type === 'videos') {
       recommendations.push({
         type: 'optimization',
-        title: '🎬 Video Transfer Optimization',
-        suggestion: 'Use --partial for large video files to enable resume capability',
-        details: 'Video files are large and transfers may be interrupted'
+        title: '🎬 Video Transfer Detected',
+        suggestion: `Transferring ${sourceInfo.fileCount} video files - resume capability is enabled`,
+        details: 'Large video files can be resumed if interrupted (--partial option active)'
       });
     }
     
     // Size-based recommendations
-    if (sourceInfo.fileCount > 1000) {
+    if (sourceInfo.fileCount > 500) {
       recommendations.push({
         type: 'performance',
-        title: '🚀 Large Transfer Optimization',
-        suggestion: 'Consider using --delete-during for efficiency with many files',
-        details: 'Reduces memory usage when synchronizing large directories'
+        title: '🚀 Large Transfer Detected',
+        suggestion: `Processing ${sourceInfo.fileCount} files - monitor progress carefully`,
+        details: 'Large transfers benefit from the parallel job system and progress tracking'
       });
     }
     
@@ -327,9 +331,16 @@ class TransferOptimizer {
       if (avgSpeed < 10 * 1024 * 1024) { // Less than 10MB/s
         recommendations.push({
           type: 'network',
-          title: '🌐 Network Performance',
-          suggestion: 'Consider running transfers during off-peak hours',
-          details: 'Historical transfers show slower speeds, network may be congested'
+          title: '🌐 Network Performance Notice',
+          suggestion: 'Previous transfers averaged less than 10MB/s - consider off-peak hours',
+          details: 'Network congestion may be affecting transfer speeds based on your history'
+        });
+      } else {
+        recommendations.push({
+          type: 'network',
+          title: '🌐 Good Network Performance',
+          suggestion: `Previous transfers averaged ${this.formatSpeed(avgSpeed)} - network looks good`,
+          details: 'Your transfer history shows consistent performance'
         });
       }
     }
@@ -338,9 +349,9 @@ class TransferOptimizer {
     if (targetInfo.name.toLowerCase().includes('backup')) {
       recommendations.push({
         type: 'backup',
-        title: '💾 Backup Best Practice',
-        suggestion: 'Use --checksum for critical backup operations',
-        details: 'Ensures data integrity by verifying file checksums'
+        title: '💾 Backup Operation Detected',
+        suggestion: 'Archive mode (-a) ensures file permissions and timestamps are preserved',
+        details: 'Your backup will maintain original file attributes and directory structure'
       });
     }
     
@@ -356,6 +367,19 @@ class TransferOptimizer {
     return parseFloat(value) * (multipliers[unit] || 1);
   }
   
+  static formatSpeed(bytesPerSecond) {
+    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    let value = bytesPerSecond;
+    let unitIndex = 0;
+    
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    
+    return `${value.toFixed(1)}${units[unitIndex]}`;
+  }
+  
   static getTimeBasedRecommendations() {
     const hour = new Date().getHours();
     const recommendations = [];
@@ -364,9 +388,23 @@ class TransferOptimizer {
     if (hour >= 9 && hour <= 17) {
       recommendations.push({
         type: 'timing',
-        title: '⏰ Peak Hours Notice',
-        suggestion: 'Consider scheduling large transfers for evening hours',
-        details: 'Network performance is typically better during off-peak times'
+        title: '⏰ Business Hours Transfer',
+        suggestion: 'Large transfers during business hours may be slower due to network usage',
+        details: 'Evening transfers (after 6 PM) typically achieve better speeds'
+      });
+    } else if (hour >= 22 || hour <= 6) {
+      recommendations.push({
+        type: 'timing',
+        title: '⏰ Off-Peak Hours - Optimal Time',
+        suggestion: 'Excellent time for large transfers - minimal network congestion',
+        details: 'Night hours typically provide the best transfer performance'
+      });
+    } else {
+      recommendations.push({
+        type: 'timing',
+        title: '⏰ Good Transfer Time',
+        suggestion: 'Evening hours offer good balance of availability and performance',
+        details: 'This is a good time for most file transfer operations'
       });
     }
     
