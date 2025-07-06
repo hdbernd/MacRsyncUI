@@ -737,13 +737,14 @@ class JobManager {
       
       // Parse file count from the "to-chk" line (this gives us overall progress info)
       // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfr#161, to-check=429/724)"
-      const fileCountMatch = trimmedLine.match(/(\d+)\s+100%\s+([\d.]+[KMGT]?B\/s)\s+\d+:\d+:\d+\s+\(xfr#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
+      // Simpler regex to just capture the file count info
+      const fileCountMatch = trimmedLine.match(/\(xfr#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
       if (trimmedLine.includes('xfr#') && trimmedLine.includes('to-chk')) {
         console.log(`Job ${job.id}: Trying to match line: "${trimmedLine}"`);
         console.log(`Job ${job.id}: Match result:`, fileCountMatch);
       }
       if (fileCountMatch) {
-        const [, transferred, speed, xfrNum, remaining, total] = fileCountMatch;
+        const [, xfrNum, remaining, total] = fileCountMatch;
         const totalFiles = parseInt(total);
         const remainingFiles = parseInt(remaining);
         const currentFiles = totalFiles - remainingFiles;
@@ -759,26 +760,8 @@ class JobManager {
         console.log(`Job ${job.id}: Progress calculation: ${currentFiles}/${totalFiles} files (${remainingFiles} remaining) = ${fileProgress}% overall progress`);
         console.log(`Job ${job.id}: Raw match: xfr#${xfrNum}, to-chk=${remainingFiles}/${totalFiles}`);
         
-        // Also update speed and transfer data from this combined line
-        job.progressData.currentSpeed = speed;
-        job.progressData.transferred = this.formatBytes(parseInt(transferred.replace(/,/g, '')));
+        // Update last update time
         job.progressData.lastUpdate = Date.now();
-        
-        // Add to speed history
-        job.progressData.speedHistory.push({
-          timestamp: Date.now(),
-          speed: this.parseSpeed(job.progressData.currentSpeed)
-        });
-        
-        if (job.progressData.speedHistory.length > 60) {
-          job.progressData.speedHistory.shift();
-        }
-        
-        // Calculate average speed
-        if (job.progressData.speedHistory.length > 1) {
-          const avgSpeed = job.progressData.speedHistory.reduce((sum, entry) => sum + entry.speed, 0) / job.progressData.speedHistory.length;
-          job.progressData.averageSpeed = this.formatSpeed(avgSpeed);
-        }
         
         // Notify UI of progress update
         this.notifyJobUpdate(job);
