@@ -270,21 +270,40 @@ async function createJob() {
     }
     
     const isMove = document.querySelector('input[name="operation"]:checked').value === 'move';
-    const jobName = jobNameInput.value.trim();
+    let jobName = jobNameInput.value.trim();
+    
+    // If no name provided, generate smart name
+    if (!jobName) {
+        try {
+            setStatus('active', 'Analyzing folders...');
+            jobName = await ipcRenderer.invoke('generate-smart-name', source, target, isMove);
+            logMessage(`🧠 Smart name generated: ${jobName}`);
+        } catch (error) {
+            console.error('Error generating smart name:', error);
+            jobName = `${isMove ? 'Move' : 'Copy'} ${source.split('/').pop() || 'Job'}`;
+        }
+        setStatus('idle', 'Ready');
+    }
     
     const config = {
         source,
         target,
         isMove,
-        name: jobName || `${isMove ? 'Move' : 'Copy'} ${source.split('/').pop() || 'Job'}`
+        name: jobName
     };
     
     try {
         const jobId = await ipcRenderer.invoke('create-job', config);
         if (jobId) {
-            logMessage(`Job created: ${config.name}`);
+            logMessage(`✅ Job created: ${config.name}`);
             jobNameInput.value = '';
             await refreshJobs();
+            
+            // Show similar transfers if any
+            showSimilarTransfers(source, target);
+            
+            // Auto-show recommendations for new jobs
+            setTimeout(() => autoShowRecommendations(source, target), 500);
         }
     } catch (error) {
         logMessage(`Error creating job: ${error.message}`);
@@ -642,10 +661,20 @@ ipcRenderer.on('job-progress', (event, { jobId, output }) => {
     }
 });
 
-ipcRenderer.on('job-error', (event, { jobId, error }) => {
+ipcRenderer.on('job-error', (event, { jobId, error, analysis }) => {
     const job = jobs.find(j => j.id === jobId);
     if (job) {
         logMessage(`[${job.name}] Error: ${error.trim()}`);
+        
+        // Show error analysis if available
+        if (analysis) {
+            logMessage(`💡 ${analysis.title}`);
+            logMessage(`   ${analysis.explanation}`);
+            logMessage(`   Suggestions:`);
+            analysis.solutions.forEach((solution, index) => {
+                logMessage(`   ${index + 1}. ${solution}`);
+            });
+        }
     }
 });
 
@@ -669,5 +698,151 @@ async function copyLogToClipboard() {
         document.execCommand('copy');
         document.body.removeChild(textArea);
         logMessage('📋 Log copied to clipboard!');
+    }
+}
+
+// Smart features functions
+async function showSimilarTransfers(sourcePath, targetPath) {
+    try {
+        const similar = await ipcRenderer.invoke('get-similar-transfers', sourcePath, targetPath);
+        if (similar.length > 0) {
+            logMessage(`🔍 Found ${similar.length} similar transfer(s) in history`);
+            similar.slice(0, 3).forEach(transfer => {
+                const duration = transfer.duration ? formatDuration(transfer.duration) : 'Unknown';
+                logMessage(`   • ${transfer.name} - ${duration} (${transfer.averageSpeed})`);
+            });
+        }
+    } catch (error) {
+        console.error('Error getting similar transfers:', error);
+    }
+}
+
+async function generateSmartName() {
+    const source = sourceFolderInput.value;
+    const target = targetFolderInput.value;
+    
+    if (!source || !target) {
+        alert('Please select both source and target folders first');
+        return;
+    }
+    
+    const isMove = document.querySelector('input[name="operation"]:checked').value === 'move';
+    
+    try {
+        setStatus('active', 'Generating smart name...');
+        const smartName = await ipcRenderer.invoke('generate-smart-name', source, target, isMove);
+        jobNameInput.value = smartName;
+        logMessage(`🧠 Smart name generated: ${smartName}`);
+        setStatus('idle', 'Ready');
+    } catch (error) {
+        logMessage(`Error generating smart name: ${error.message}`);
+        setStatus('idle', 'Ready');
+    }
+}
+
+async function showTransferHistory() {
+    try {
+        const history = await ipcRenderer.invoke('get-transfer-history', 10);
+        if (history.length === 0) {
+            logMessage('📚 No transfer history found');
+            return;
+        }
+        
+        logMessage(`📚 Recent transfer history (${history.length} entries):`);
+        history.forEach((transfer, index) => {
+            const duration = transfer.duration ? formatDuration(transfer.duration) : 'Unknown';
+            const status = transfer.status === 'completed' ? '✅' : '❌';
+            logMessage(`   ${index + 1}. ${status} ${transfer.name} - ${duration}`);
+        });
+    } catch (error) {
+        logMessage(`Error loading transfer history: ${error.message}`);
+    }
+}
+
+function formatDuration(milliseconds) {
+    const seconds = Math.floor(milliseconds / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${seconds % 60}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
+// Optimization recommendations functions
+async function showOptimizationRecommendations() {
+    const source = sourceFolderInput.value;
+    const target = targetFolderInput.value;
+    
+    if (!source || !target) {
+        alert('Please select both source and target folders first');
+        return;
+    }
+    
+    try {
+        setStatus('active', 'Getting optimization recommendations...');
+        const recommendations = await ipcRenderer.invoke('get-optimization-recommendations', source, target);
+        
+        if (recommendations.length === 0) {
+            logMessage('💡 No specific optimization recommendations found for this transfer');
+            setStatus('idle', 'Ready');
+            return;
+        }
+        
+        displayRecommendations(recommendations);
+        logMessage(`💡 Found ${recommendations.length} optimization recommendation(s)`);
+        setStatus('idle', 'Ready');
+    } catch (error) {
+        logMessage(`Error getting optimization recommendations: ${error.message}`);
+        setStatus('idle', 'Ready');
+    }
+}
+
+function displayRecommendations(recommendations) {
+    const recommendationsSection = document.getElementById('recommendations-section');
+    const recommendationsContent = document.getElementById('recommendations-content');
+    
+    // Clear previous recommendations
+    recommendationsContent.innerHTML = '';
+    
+    // Create recommendation items
+    recommendations.forEach(rec => {
+        const item = document.createElement('div');
+        item.className = `recommendation-item ${rec.type}`;
+        
+        item.innerHTML = `
+            <div class="recommendation-title">${rec.title}</div>
+            <div class="recommendation-suggestion">${rec.suggestion}</div>
+            <div class="recommendation-details">${rec.details}</div>
+        `;
+        
+        recommendationsContent.appendChild(item);
+    });
+    
+    // Show the recommendations section
+    recommendationsSection.style.display = 'block';
+    
+    // Scroll to recommendations section
+    recommendationsSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideRecommendations() {
+    const recommendationsSection = document.getElementById('recommendations-section');
+    recommendationsSection.style.display = 'none';
+}
+
+// Auto-show recommendations when creating a job
+async function autoShowRecommendations(source, target) {
+    try {
+        const recommendations = await ipcRenderer.invoke('get-optimization-recommendations', source, target);
+        if (recommendations.length > 0) {
+            displayRecommendations(recommendations);
+        }
+    } catch (error) {
+        console.error('Error auto-showing recommendations:', error);
     }
 }

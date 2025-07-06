@@ -211,6 +211,12 @@
             color: #28a745;
         }
         
+        .job-name-section {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+        
         .job-name-input {
             padding: 8px;
             border: 2px solid #ddd;
@@ -218,6 +224,19 @@
             font-size: 14px;
             flex: 1;
             max-width: 200px;
+        }
+        
+        .smart-name-btn {
+            padding: 8px 12px;
+            min-width: auto;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        
+        .smart-name-btn:hover {
+            background: #5a6268;
+            transform: scale(1.1);
         }
         
         .jobs-section {
@@ -458,6 +477,72 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
+        
+        .recommendations-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .recommendations-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .recommendation-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            border-left: 4px solid #007AFF;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .recommendation-item.optimization {
+            border-left-color: #28a745;
+        }
+        
+        .recommendation-item.performance {
+            border-left-color: #ffc107;
+        }
+        
+        .recommendation-item.network {
+            border-left-color: #17a2b8;
+        }
+        
+        .recommendation-item.backup {
+            border-left-color: #6f42c1;
+        }
+        
+        .recommendation-item.timing {
+            border-left-color: #fd7e14;
+        }
+        
+        .recommendation-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+        }
+        
+        .recommendation-suggestion {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 2px;
+        }
+        
+        .recommendation-details {
+            font-size: 12px;
+            color: #888;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -505,8 +590,12 @@
                     </label>
                 </div>
                 
-                <input type="text" id="job-name" placeholder="Job name (optional)" class="job-name-input">
+                <div class="job-name-section">
+                    <input type="text" id="job-name" placeholder="Job name (optional)" class="job-name-input">
+                    <button class="btn btn-secondary smart-name-btn" onclick="generateSmartName()" title="Generate smart name based on folder contents">🧠</button>
+                </div>
                 <button class="btn btn-primary" onclick="createJob()" id="create-job-btn">Add to Queue</button>
+                <button class="btn btn-secondary" onclick="showOptimizationRecommendations()" title="Get optimization recommendations">💡 Tips</button>
                 <button class="btn btn-primary" onclick="startSync()" id="start-btn">Start Sync</button>
                 <button class="btn btn-danger hidden" onclick="stopSync()" id="stop-btn">Stop Sync</button>
             </div>
@@ -518,6 +607,16 @@
                 </div>
                 <button class="btn btn-secondary" onclick="saveConfig()">Save Config</button>
             </div>
+            
+            <div class="recommendations-section" id="recommendations-section" style="display: none;">
+                <div class="recommendations-title">
+                    <span>💡 Optimization Recommendations</span>
+                    <button class="btn btn-secondary" onclick="hideRecommendations()" style="margin-left: auto; padding: 4px 8px; font-size: 12px;">✕</button>
+                </div>
+                <div id="recommendations-content">
+                    <!-- Recommendations will be populated here -->
+                </div>
+            </div>
         </div>
         
         <div class="jobs-section">
@@ -525,6 +624,7 @@
             <div class="jobs-controls">
                 <button class="btn btn-secondary" onclick="refreshJobs()">Refresh</button>
                 <button class="btn btn-secondary" onclick="clearCompletedJobs()">Clear Completed</button>
+                <button class="btn btn-secondary" onclick="showTransferHistory()">📚 History</button>
             </div>
             <div class="jobs-list" id="jobs-list">
                 <div class="no-jobs">No jobs in queue</div>
