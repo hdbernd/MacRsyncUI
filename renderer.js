@@ -323,16 +323,26 @@ async function startJob(jobId) {
 }
 
 async function pauseJob(jobId) {
+    alert(`Pause button clicked for job: ${jobId}`); // Debug test
+    console.log(`Frontend: Attempting to pause job ${jobId}`);
+    logMessage(`Attempting to pause job: ${jobId}`);
     try {
         const success = await ipcRenderer.invoke('pause-job', jobId);
+        console.log(`Frontend: Pause result for job ${jobId}:`, success);
         if (success) {
-            logMessage(`Job paused: ${jobId}`);
+            logMessage(`Job paused successfully: ${jobId}`);
             await refreshJobs();
+        } else {
+            logMessage(`Failed to pause job: ${jobId}`);
         }
     } catch (error) {
+        console.error(`Frontend: Error pausing job ${jobId}:`, error);
         logMessage(`Error pausing job: ${error.message}`);
     }
 }
+
+// Make functions globally available
+window.pauseJob = pauseJob;
 
 async function resumeJob(jobId) {
     try {
@@ -347,16 +357,26 @@ async function resumeJob(jobId) {
 }
 
 async function stopJob(jobId) {
+    alert(`Stop button clicked for job: ${jobId}`); // Debug test
+    console.log(`Frontend: Attempting to stop job ${jobId}`);
+    logMessage(`Attempting to stop job: ${jobId}`);
     try {
         const success = await ipcRenderer.invoke('stop-job', jobId);
+        console.log(`Frontend: Stop result for job ${jobId}:`, success);
         if (success) {
-            logMessage(`Job stopped: ${jobId}`);
+            logMessage(`Job stopped successfully: ${jobId}`);
             await refreshJobs();
+        } else {
+            logMessage(`Failed to stop job: ${jobId}`);
         }
     } catch (error) {
+        console.error(`Frontend: Error stopping job ${jobId}:`, error);
         logMessage(`Error stopping job: ${error.message}`);
     }
 }
+
+// Make functions globally available
+window.stopJob = stopJob;
 
 async function restartJob(jobId) {
     try {
@@ -588,6 +608,8 @@ function createJobHTML(job) {
                     <div class="job-stats-left">
                         <span class="speed-current">🚀 ${progress.currentSpeed}</span>
                         <span class="speed-average">📊 ${progress.averageSpeed}</span>
+                        ${progress.highestSpeed && progress.highestSpeed !== '0B/s' ? `<span class="speed-highest">📈 Max: ${progress.highestSpeed}</span>` : ''}
+                        ${progress.lowestSpeed && progress.lowestSpeed !== '0B/s' ? `<span class="speed-lowest">📉 Min: ${progress.lowestSpeed}</span>` : ''}
                         <span class="transferred">📦 ${progress.transferred}${progress.total && progress.total !== '0B' ? `/${progress.total}` : ''}</span>
                         ${fileProgress ? `<span class="file-count">📁 ${fileProgress}</span>` : ''}
                     </div>

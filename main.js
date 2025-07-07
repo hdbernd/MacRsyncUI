@@ -577,7 +577,9 @@ class JobManager {
     args.push(job.source + '/');
     args.push(job.target);
 
+    console.log(`Executing rsync for job ${job.id} with args:`, args);
     job.process = spawn('rsync', args);
+    console.log(`Job ${job.id} process created, PID:`, job.process.pid);
 
     job.process.stdout.on('data', (data) => {
       const output = data.toString();
@@ -624,56 +626,98 @@ class JobManager {
 
   pauseJob(jobId) {
     const job = this.jobs.get(jobId);
-    if (!job || job.status !== 'running') return false;
+    console.log(`Attempting to pause job ${jobId}, current status: ${job?.status}`);
+    console.log(`Job process exists: ${!!job?.process}, killed: ${job?.process?.killed}, PID: ${job?.process?.pid}`);
     
-    if (job.process) {
+    if (!job || job.status !== 'running') {
+      console.log(`Cannot pause job ${jobId}: job not found or not running`);
+      return false;
+    }
+    
+    if (job.process && !job.process.killed) {
       try {
-        job.process.kill('SIGSTOP');
+        console.log(`Sending SIGTERM to pause job ${jobId}, PID: ${job.process.pid}`);
+        // Use SIGTERM for more reliable pausing on macOS
+        job.process.kill('SIGTERM');
         job.status = 'paused';
+        job.pausedTime = new Date().toISOString();
+        job.process = null; // Clear process reference
         // Preserve progress data when pausing
         this.notifyJobUpdate(job);
+        console.log(`Job ${jobId} paused successfully`);
         return true;
       } catch (error) {
         console.error('Error pausing job:', error);
         return false;
       }
+    } else {
+      console.log(`No active process found for job ${jobId}, process:`, job.process);
+      job.status = 'paused';
+      job.pausedTime = new Date().toISOString();
+      this.notifyJobUpdate(job);
+      return true;
     }
-    return false;
   }
 
   resumeJob(jobId) {
     const job = this.jobs.get(jobId);
-    if (!job || job.status !== 'paused') return false;
+    console.log(`Attempting to resume job ${jobId}, current status: ${job?.status}`);
     
-    if (job.process) {
-      try {
-        job.process.kill('SIGCONT');
-        job.status = 'running';
-        this.notifyJobUpdate(job);
-        return true;
-      } catch (error) {
-        console.error('Error resuming job:', error);
-        return false;
-      }
+    if (!job || job.status !== 'paused') {
+      console.log(`Cannot resume job ${jobId}: job not found or not paused`);
+      return false;
     }
-    return false;
+    
+    // Since we use SIGTERM to pause, we need to restart the job
+    console.log(`Restarting paused job ${jobId} from current progress`);
+    job.status = 'running';
+    job.resumedTime = new Date().toISOString();
+    
+    // Restart the rsync process
+    return this.startJob(job.id);
   }
 
   stopJob(jobId) {
     const job = this.jobs.get(jobId);
-    if (!job || !['running', 'paused', 'queued'].includes(job.status)) return false;
+    console.log(`Attempting to stop job ${jobId}, current status: ${job?.status}`);
     
-    if (job.process) {
-      job.process.kill();
-      job.process = null;
+    if (!job || !['running', 'paused', 'queued'].includes(job.status)) {
+      console.log(`Cannot stop job ${jobId}: job not found or invalid status`);
+      return false;
     }
     
+    if (job.process && !job.process.killed) {
+      try {
+        console.log(`Sending SIGTERM to stop job ${jobId}`);
+        // Try graceful termination first
+        job.process.kill('SIGTERM');
+        
+        // Force kill if still running after 2 seconds
+        setTimeout(() => {
+          if (job.process && !job.process.killed) {
+            console.log(`Force killing job ${jobId} process with SIGKILL`);
+            try {
+              job.process.kill('SIGKILL');
+            } catch (killError) {
+              console.error('Error force killing process:', killError);
+            }
+          }
+        }, 2000);
+        
+      } catch (error) {
+        console.error('Error stopping job:', error);
+      }
+    }
+    
+    job.process = null;
     job.status = 'stopped';
     job.endTime = new Date().toISOString();
+    
     // Preserve progress data when stopping
     this.activeJobs.delete(jobId);
     this.notifyJobUpdate(job);
     this.startNextQueuedJob();
+    console.log(`Job ${jobId} stopped successfully`);
     return true;
   }
 
@@ -698,6 +742,8 @@ class JobManager {
       percentage: 0,
       currentSpeed: '0B/s',
       averageSpeed: '0B/s',
+      highestSpeed: '0B/s',
+      lowestSpeed: '0B/s',
       transferred: '0B',
       total: '0B',
       totalBytes: 0,
@@ -735,27 +781,61 @@ class JobManager {
       const trimmedLine = line.trim();
       if (!trimmedLine) continue;
       
-      // Parse file count from the rsync progress line
+      // Parse complete rsync progress line with file count AND speed
       // Format: "        2506567 100%   42.84MB/s   00:00:00 (xfer#161, to-check=429/724)"
-      const fileCountMatch = trimmedLine.match(/\(xfer#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
-      if (fileCountMatch) {
-        const [, xfrNum, remaining, total] = fileCountMatch;
-        const totalFiles = parseInt(total);
-        const remainingFiles = parseInt(remaining);
-        const transferredFiles = parseInt(xfrNum); // Use xfr# as files transferred
+      const fullProgressMatch = trimmedLine.match(/^\s*(\d{1,3}(?:,\d{3})*|\d+)\s+(\d+)%\s+([\d.]+[KMGT]?B\/s)\s+(\d+:\d+:\d+)\s+\(xfer#(\d+),\s*to-check=(\d+)\/(\d+)\)/);
+      if (fullProgressMatch) {
+        const [, transferred, percentage, speed, timeRemaining, xfrNum, remaining, total] = fullProgressMatch;
         
+        // File count and progress
+        const totalFiles = parseInt(total);
+        const transferredFiles = parseInt(xfrNum);
         job.progressData.fileCount.total = totalFiles;
         job.progressData.fileCount.current = transferredFiles;
         
         // Calculate overall progress based on files transferred (xfr#)
         const fileProgress = totalFiles > 0 ? Math.round((transferredFiles / totalFiles) * 100) : 0;
-        job.progressData.percentage = Math.max(0, Math.min(100, fileProgress)); // Clamp between 0-100
+        job.progressData.percentage = Math.max(0, Math.min(100, fileProgress));
         job.progress = job.progressData.percentage;
         
-        // Debug: console.log(`Job ${job.id}: Progress: ${transferredFiles}/${totalFiles} files = ${fileProgress}%`);
-        
-        // Update last update time
+        // Speed and transfer data
+        job.progressData.currentSpeed = speed;
+        job.progressData.transferred = this.formatBytes(parseInt(transferred.replace(/,/g, '')));
+        job.progressData.eta = timeRemaining;
         job.progressData.lastUpdate = Date.now();
+        
+        // Add to speed history and update highest/lowest speeds
+        const currentSpeedBytes = this.parseSpeed(speed);
+        job.progressData.speedHistory.push({
+          timestamp: Date.now(),
+          speed: currentSpeedBytes
+        });
+        
+        if (job.progressData.speedHistory.length > 60) {
+          job.progressData.speedHistory.shift();
+        }
+        
+        // Update highest and lowest speeds
+        if (currentSpeedBytes > 0) {
+          const currentHigh = this.parseSpeed(job.progressData.highestSpeed) || 0;
+          const currentLow = this.parseSpeed(job.progressData.lowestSpeed) || Infinity;
+          
+          if (currentSpeedBytes > currentHigh) {
+            job.progressData.highestSpeed = speed;
+          }
+          
+          if (currentSpeedBytes < currentLow || currentLow === Infinity) {
+            job.progressData.lowestSpeed = speed;
+          }
+        }
+        
+        // Calculate average speed
+        if (job.progressData.speedHistory.length > 1) {
+          const avgSpeed = job.progressData.speedHistory.reduce((sum, entry) => sum + entry.speed, 0) / job.progressData.speedHistory.length;
+          job.progressData.averageSpeed = this.formatSpeed(avgSpeed);
+        }
+        
+        console.log(`Job ${job.id}: Speed: ${speed}, High: ${job.progressData.highestSpeed}, Low: ${job.progressData.lowestSpeed}, Avg: ${job.progressData.averageSpeed}`);
         
         // Notify UI of progress update
         this.notifyJobUpdate(job);
@@ -774,13 +854,28 @@ class JobManager {
         job.progressData.lastUpdate = Date.now();
         
         // Add to speed history
+        const currentSpeedBytes = this.parseSpeed(speed);
         job.progressData.speedHistory.push({
           timestamp: Date.now(),
-          speed: this.parseSpeed(speed)
+          speed: currentSpeedBytes
         });
         
         if (job.progressData.speedHistory.length > 60) {
           job.progressData.speedHistory.shift();
+        }
+        
+        // Update highest and lowest speeds
+        if (currentSpeedBytes > 0) {
+          const currentHigh = this.parseSpeed(job.progressData.highestSpeed) || 0;
+          const currentLow = this.parseSpeed(job.progressData.lowestSpeed) || Infinity;
+          
+          if (currentSpeedBytes > currentHigh) {
+            job.progressData.highestSpeed = speed;
+          }
+          
+          if (currentSpeedBytes < currentLow || currentLow === Infinity) {
+            job.progressData.lowestSpeed = speed;
+          }
         }
         
         // Calculate average speed
@@ -819,6 +914,8 @@ class JobManager {
   }
 
   parseSpeed(speedStr) {
+    if (!speedStr || typeof speedStr !== 'string') return 0;
+    
     const match = speedStr.match(/([\d.]+)([KMGT]?)B\/s/);
     if (!match) return 0;
     
@@ -1089,8 +1186,14 @@ ipcMain.handle('start-job', async (event, jobId) => {
 });
 
 ipcMain.handle('pause-job', async (event, jobId) => {
-  if (!jobManager) return false;
-  return jobManager.pauseJob(jobId);
+  console.log(`IPC: Received pause-job request for ${jobId}`);
+  if (!jobManager) {
+    console.log('IPC: No jobManager available');
+    return false;
+  }
+  const result = jobManager.pauseJob(jobId);
+  console.log(`IPC: Pause job result for ${jobId}:`, result);
+  return result;
 });
 
 ipcMain.handle('resume-job', async (event, jobId) => {
@@ -1099,8 +1202,14 @@ ipcMain.handle('resume-job', async (event, jobId) => {
 });
 
 ipcMain.handle('stop-job', async (event, jobId) => {
-  if (!jobManager) return false;
-  return jobManager.stopJob(jobId);
+  console.log(`IPC: Received stop-job request for ${jobId}`);
+  if (!jobManager) {
+    console.log('IPC: No jobManager available');
+    return false;
+  }
+  const result = jobManager.stopJob(jobId);
+  console.log(`IPC: Stop job result for ${jobId}:`, result);
+  return result;
 });
 
 ipcMain.handle('restart-job', async (event, jobId) => {
