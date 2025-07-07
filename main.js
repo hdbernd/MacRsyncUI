@@ -949,43 +949,59 @@ app.on('activate', () => {
 // IPC handlers
 ipcMain.handle('select-folder', async (event, isSource = true) => {
   try {
-    console.log('Opening folder dialog using osascript...');
+    console.log('Opening native Electron folder dialog...');
     
-    // Use native macOS dialog via osascript
-    const { exec } = require('child_process');
-    const util = require('util');
-    const execAsync = util.promisify(exec);
+    // Use fast native Electron dialog directly
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: isSource ? 'Select Source Folder' : 'Select Target Folder',
+      defaultPath: isSource ? '/Volumes' : process.env.HOME
+    });
     
-    const title = isSource ? 'Select Source Folder' : 'Select Target Folder';
-    const defaultPath = isSource ? '/Volumes' : process.env.HOME;
-    
-    const script = `osascript -e 'tell application "System Events" to return POSIX path of (choose folder with prompt "${title}" default location "${defaultPath}")'`;
-    
-    const { stdout } = await execAsync(script);
-    const selectedPath = stdout.trim();
-    
-    console.log('Selected path:', selectedPath);
-    return selectedPath || null;
-    
-  } catch (error) {
-    console.error('Error opening dialog:', error);
-    
-    // Fallback to Electron dialog
-    try {
-      const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory'],
-        title: isSource ? 'Select Source Folder' : 'Select Target Folder',
-        defaultPath: isSource ? '/Volumes' : process.env.HOME
-      });
-      
-      if (!result.canceled && result.filePaths.length > 0) {
-        return result.filePaths[0];
-      }
-    } catch (fallbackError) {
-      console.error('Fallback dialog also failed:', fallbackError);
+    if (!result.canceled && result.filePaths.length > 0) {
+      console.log('Selected path:', result.filePaths[0]);
+      return result.filePaths[0];
     }
     
     return null;
+    
+  } catch (error) {
+    console.error('Error opening dialog:', error);
+    return null;
+  }
+});
+
+// Fast directory browsing API
+ipcMain.handle('browse-directories', async (event, path = '/') => {
+  try {
+    const fs = require('fs');
+    const pathModule = require('path');
+    
+    // Sanitize path
+    const safePath = pathModule.resolve(path);
+    
+    // Read directory contents
+    const items = await fs.promises.readdir(safePath, { withFileTypes: true });
+    
+    // Filter and format directories only
+    const directories = items
+      .filter(item => item.isDirectory())
+      .map(item => ({
+        name: item.name,
+        path: pathModule.join(safePath, item.name),
+        isDirectory: true
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    
+    return {
+      currentPath: safePath,
+      parent: pathModule.dirname(safePath),
+      directories
+    };
+    
+  } catch (error) {
+    console.error('Error browsing directories:', error);
+    return { currentPath: path, parent: '/', directories: [] };
   }
 });
 

@@ -543,6 +543,125 @@
             color: #888;
             font-style: italic;
         }
+        
+        /* Custom File Browser Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 700px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .close-button {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+        }
+        
+        .close-button:hover {
+            color: #333;
+        }
+        
+        .modal-body {
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .browser-path {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .browser-path input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+        
+        .browser-list {
+            min-height: 200px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+        
+        .folder-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .folder-item:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .folder-item:last-child {
+            border-bottom: none;
+        }
+        
+        .folder-icon {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #666;
+        }
+        
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 20px;
+            border-top: 1px solid #eee;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
     </style>
 </head>
 <body>
@@ -554,6 +673,7 @@
             <div class="folder-input">
                 <input type="text" id="source-folder" class="folder-path" placeholder="Type path or drag folder here...">
                 <button class="btn btn-primary" onclick="selectFolder(true)">Browse</button>
+                <button class="btn btn-secondary" onclick="showCustomBrowser(true)">Quick Browse</button>
             </div>
             <div class="drop-zone" id="source-drop" data-target="source">
                 <div class="drop-zone-content">
@@ -568,6 +688,7 @@
             <div class="folder-input">
                 <input type="text" id="target-folder" class="folder-path" placeholder="Type path or drag folder here...">
                 <button class="btn btn-primary" onclick="selectFolder(false)">Browse</button>
+                <button class="btn btn-secondary" onclick="showCustomBrowser(false)">Quick Browse</button>
             </div>
             <div class="drop-zone" id="target-drop" data-target="target">
                 <div class="drop-zone-content">
@@ -637,6 +758,29 @@
                 <button class="btn btn-secondary" onclick="copyLogToClipboard()" title="Copy entire log to clipboard">📋 Copy Log</button>
             </div>
             <div class="progress-log" id="progress-log"></div>
+        </div>
+    </div>
+
+    <!-- Custom File Browser Modal -->
+    <div id="file-browser-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="browser-title">Select Folder</h3>
+                <button class="close-button" onclick="closeCustomBrowser()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="browser-path">
+                    <input type="text" id="current-path" readonly>
+                    <button class="btn btn-secondary" onclick="goToParent()">↑ Up</button>
+                </div>
+                <div class="browser-list" id="browser-list">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeCustomBrowser()">Cancel</button>
+                <button class="btn btn-primary" onclick="selectCurrentPath()">Select This Folder</button>
+            </div>
         </div>
     </div>
 

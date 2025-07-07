@@ -846,3 +846,73 @@ async function autoShowRecommendations(source, target) {
         console.error('Error auto-showing recommendations:', error);
     }
 }
+
+// Custom File Browser Functions
+let currentBrowserPath = '/';
+let isBrowserForSource = true;
+
+async function showCustomBrowser(isSource) {
+    isBrowserForSource = isSource;
+    const modal = document.getElementById('file-browser-modal');
+    const title = document.getElementById('browser-title');
+    
+    title.textContent = isSource ? 'Select Source Folder' : 'Select Target Folder';
+    currentBrowserPath = isSource ? '/Volumes' : process.env.HOME || '/';
+    
+    modal.style.display = 'block';
+    await loadDirectoryContents(currentBrowserPath);
+}
+
+function closeCustomBrowser() {
+    const modal = document.getElementById('file-browser-modal');
+    modal.style.display = 'none';
+}
+
+async function loadDirectoryContents(path) {
+    const browserList = document.getElementById('browser-list');
+    const currentPathInput = document.getElementById('current-path');
+    
+    try {
+        browserList.innerHTML = '<div class="loading">Loading...</div>';
+        currentPathInput.value = path;
+        
+        const result = await ipcRenderer.invoke('browse-directories', path);
+        currentBrowserPath = result.currentPath;
+        
+        browserList.innerHTML = '';
+        
+        // Add directories
+        result.directories.forEach(dir => {
+            const item = document.createElement('div');
+            item.className = 'folder-item';
+            item.innerHTML = `
+                <span class="folder-icon">📁</span>
+                <span>${dir.name}</span>
+            `;
+            item.onclick = () => loadDirectoryContents(dir.path);
+            browserList.appendChild(item);
+        });
+        
+        if (result.directories.length === 0) {
+            browserList.innerHTML = '<div class="loading">No folders found</div>';
+        }
+        
+    } catch (error) {
+        console.error('Error loading directory contents:', error);
+        browserList.innerHTML = '<div class="loading">Error loading directory</div>';
+    }
+}
+
+async function goToParent() {
+    const pathModule = require('path');
+    const parent = pathModule.dirname(currentBrowserPath);
+    if (parent !== currentBrowserPath) {
+        await loadDirectoryContents(parent);
+    }
+}
+
+function selectCurrentPath() {
+    const targetInput = isBrowserForSource ? sourceFolderInput : targetFolderInput;
+    targetInput.value = currentBrowserPath;
+    closeCustomBrowser();
+}
