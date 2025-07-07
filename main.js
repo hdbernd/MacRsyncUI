@@ -501,6 +501,20 @@ class JobManager {
     this.transferHistory = new TransferHistory();
   }
 
+  // Helper function to build rsync command
+  buildRsyncCommand(source, target, isMove) {
+    const args = ['-avz', '--partial', '--progress', '--human-readable', '--stats'];
+    
+    if (isMove) {
+      args.push('--remove-source-files');
+    }
+    
+    args.push(source + '/');
+    args.push(target);
+    
+    return `rsync ${args.join(' ')}`;
+  }
+
   async createJob(config) {
     // Generate smart name if not provided
     let jobName = config.name;
@@ -538,8 +552,11 @@ class JobManager {
         currentFile: '',
         fileCount: { current: 0, total: 0 },
         speedHistory: [],
-        lastUpdate: null
-      }
+        lastUpdate: null,
+        highestSpeed: '0B/s',
+        lowestSpeed: '0B/s'
+      },
+      rsyncCommand: this.buildRsyncCommand(config.source, config.target, config.isMove)
     };
     
     this.jobs.set(job.id, job);
@@ -577,7 +594,7 @@ class JobManager {
     args.push(job.source + '/');
     args.push(job.target);
 
-    console.log(`Executing rsync for job ${job.id} with args:`, args);
+    console.log(`Executing rsync for job ${job.id} with command: ${job.rsyncCommand}`);
     job.process = spawn('rsync', args);
     console.log(`Job ${job.id} process created, PID:`, job.process.pid);
 
@@ -688,16 +705,18 @@ class JobManager {
     
     if (job.process && !job.process.killed) {
       try {
-        console.log(`Sending SIGTERM to stop job ${jobId}`);
+        console.log(`Sending SIGTERM to stop job ${jobId}, PID: ${job.process.pid}`);
+        const processToKill = job.process; // Keep reference before nulling
+        
         // Try graceful termination first
         job.process.kill('SIGTERM');
         
         // Force kill if still running after 2 seconds
         setTimeout(() => {
-          if (job.process && !job.process.killed) {
+          if (processToKill && !processToKill.killed) {
             console.log(`Force killing job ${jobId} process with SIGKILL`);
             try {
-              job.process.kill('SIGKILL');
+              processToKill.kill('SIGKILL');
             } catch (killError) {
               console.error('Error force killing process:', killError);
             }

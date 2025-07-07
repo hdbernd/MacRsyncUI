@@ -3,6 +3,50 @@ const { ipcRenderer } = require('electron');
 let isRunning = false;
 let jobs = [];
 
+// Declare functions first so they can be attached to window immediately
+async function pauseJob(jobId) {
+    console.log(`Frontend: Attempting to pause job ${jobId}`);
+    logMessage(`Attempting to pause job: ${jobId}`);
+    
+    try {
+        const success = await ipcRenderer.invoke('pause-job', jobId);
+        console.log(`Frontend: Pause result for job ${jobId}:`, success);
+        if (success) {
+            logMessage(`Job paused successfully: ${jobId}`);
+        } else {
+            logMessage(`Failed to pause job: ${jobId}`);
+        }
+    } catch (error) {
+        console.error(`Frontend: Error pausing job ${jobId}:`, error);
+        logMessage(`Error pausing job: ${error.message}`);
+    }
+}
+
+async function stopJob(jobId) {
+    console.log(`Frontend: Attempting to stop job ${jobId}`);
+    logMessage(`Attempting to stop job: ${jobId}`);
+    
+    try {
+        const success = await ipcRenderer.invoke('stop-job', jobId);
+        console.log(`Frontend: Stop result for job ${jobId}:`, success);
+        if (success) {
+            logMessage(`Job stopped successfully: ${jobId}`);
+        } else {
+            logMessage(`Failed to stop job: ${jobId}`);
+        }
+    } catch (error) {
+        console.error(`Frontend: Error stopping job ${jobId}:`, error);
+        logMessage(`Error stopping job: ${error.message}`);
+    }
+}
+
+// Forward declarations for functions that will be defined later
+let startJob, resumeJob, restartJob, removeJob;
+
+// Attach to window immediately
+window.pauseJob = pauseJob;
+window.stopJob = stopJob;
+
 // DOM elements
 const sourceFolderInput = document.getElementById('source-folder');
 const targetFolderInput = document.getElementById('target-folder');
@@ -39,6 +83,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     setInterval(async () => {
         await refreshJobs();
     }, 2000);
+    
+    // Make job management functions globally available for onclick handlers
+    window.startJob = startJob;
+    window.pauseJob = pauseJob;
+    window.resumeJob = resumeJob;
+    window.stopJob = stopJob;
+    window.restartJob = restartJob;
+    window.removeJob = removeJob;
+    
+    // Debug: Log that functions are attached
+    console.log('Job management functions attached to window:', {
+        startJob: typeof window.startJob,
+        pauseJob: typeof window.pauseJob,
+        resumeJob: typeof window.resumeJob,
+        stopJob: typeof window.stopJob,
+        restartJob: typeof window.restartJob,
+        removeJob: typeof window.removeJob
+    });
+    
+    // Add event delegation for job control buttons
+    const jobsList = document.getElementById('jobs-list');
+    jobsList.addEventListener('click', function(event) {
+        const target = event.target;
+        const jobId = target.getAttribute('data-job-id');
+        
+        if (!jobId) return;
+        
+        console.log(`Button clicked: ${target.className}, jobId: ${jobId}`);
+        
+        if (target.classList.contains('job-pause-btn')) {
+            console.log(`Pause button clicked for job ${jobId}`);
+            pauseJob(jobId);
+        } else if (target.classList.contains('job-stop-btn')) {
+            console.log(`Stop button clicked for job ${jobId}`);
+            stopJob(jobId);
+        }
+    });
 });
 
 // Folder selection
@@ -310,7 +391,7 @@ async function createJob() {
     }
 }
 
-async function startJob(jobId) {
+startJob = async function(jobId) {
     try {
         const success = await ipcRenderer.invoke('start-job', jobId);
         if (success) {
@@ -320,31 +401,10 @@ async function startJob(jobId) {
     } catch (error) {
         logMessage(`Error starting job: ${error.message}`);
     }
-}
+};
+window.startJob = startJob;
 
-async function pauseJob(jobId) {
-    alert(`Pause button clicked for job: ${jobId}`); // Debug test
-    console.log(`Frontend: Attempting to pause job ${jobId}`);
-    logMessage(`Attempting to pause job: ${jobId}`);
-    try {
-        const success = await ipcRenderer.invoke('pause-job', jobId);
-        console.log(`Frontend: Pause result for job ${jobId}:`, success);
-        if (success) {
-            logMessage(`Job paused successfully: ${jobId}`);
-            await refreshJobs();
-        } else {
-            logMessage(`Failed to pause job: ${jobId}`);
-        }
-    } catch (error) {
-        console.error(`Frontend: Error pausing job ${jobId}:`, error);
-        logMessage(`Error pausing job: ${error.message}`);
-    }
-}
-
-// Make functions globally available
-window.pauseJob = pauseJob;
-
-async function resumeJob(jobId) {
+resumeJob = async function(jobId) {
     try {
         const success = await ipcRenderer.invoke('resume-job', jobId);
         if (success) {
@@ -354,31 +414,10 @@ async function resumeJob(jobId) {
     } catch (error) {
         logMessage(`Error resuming job: ${error.message}`);
     }
-}
+};
+window.resumeJob = resumeJob;
 
-async function stopJob(jobId) {
-    alert(`Stop button clicked for job: ${jobId}`); // Debug test
-    console.log(`Frontend: Attempting to stop job ${jobId}`);
-    logMessage(`Attempting to stop job: ${jobId}`);
-    try {
-        const success = await ipcRenderer.invoke('stop-job', jobId);
-        console.log(`Frontend: Stop result for job ${jobId}:`, success);
-        if (success) {
-            logMessage(`Job stopped successfully: ${jobId}`);
-            await refreshJobs();
-        } else {
-            logMessage(`Failed to stop job: ${jobId}`);
-        }
-    } catch (error) {
-        console.error(`Frontend: Error stopping job ${jobId}:`, error);
-        logMessage(`Error stopping job: ${error.message}`);
-    }
-}
-
-// Make functions globally available
-window.stopJob = stopJob;
-
-async function restartJob(jobId) {
+restartJob = async function(jobId) {
     try {
         const success = await ipcRenderer.invoke('restart-job', jobId);
         if (success) {
@@ -388,9 +427,10 @@ async function restartJob(jobId) {
     } catch (error) {
         logMessage(`Error restarting job: ${error.message}`);
     }
-}
+};
+window.restartJob = restartJob;
 
-async function removeJob(jobId) {
+removeJob = async function(jobId) {
     if (confirm('Are you sure you want to remove this job?')) {
         try {
             const success = await ipcRenderer.invoke('remove-job', jobId);
@@ -402,7 +442,8 @@ async function removeJob(jobId) {
             logMessage(`Error removing job: ${error.message}`);
         }
     }
-}
+};
+window.removeJob = removeJob;
 
 async function refreshJobs() {
     try {
@@ -566,8 +607,9 @@ function createJobHTML(job) {
                 controls.push(`<button class="btn btn-danger" onclick="removeJob('${job.id}')">Remove</button>`);
                 break;
             case 'running':
-                controls.push(`<button class="btn btn-secondary" onclick="pauseJob('${job.id}')">Pause</button>`);
-                controls.push(`<button class="btn btn-danger" onclick="stopJob('${job.id}')">Stop</button>`);
+                console.log(`Creating pause/stop buttons for job ${job.id}`);
+                controls.push(`<button class="btn btn-secondary job-pause-btn" data-job-id="${job.id}">Pause</button>`);
+                controls.push(`<button class="btn btn-danger job-stop-btn" data-job-id="${job.id}">Stop</button>`);
                 break;
             case 'paused':
                 controls.push(`<button class="btn btn-primary" onclick="resumeJob('${job.id}')">Resume</button>`);
@@ -629,6 +671,7 @@ function createJobHTML(job) {
             <div class="job-info">
                 <div class="job-name">${job.name}</div>
                 <div class="job-paths">${sourceName} → ${targetName}</div>
+                ${job.rsyncCommand ? `<div class="job-rsync-command">💻 ${job.rsyncCommand}</div>` : ''}
                 <div class="job-time">
                     ${job.startTime ? `Started: ${formatTime(job.startTime)}` : ''}
                     ${job.endTime ? ` | Ended: ${formatTime(job.endTime)}` : ''}
